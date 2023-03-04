@@ -67,10 +67,19 @@ concept Number = std::integral<T> || std::floating_point<T>;
 
 template <std::floating_point FloatType>
 class Interval {
+    static bool s_truncateImaginaryValue;
+
     FloatType m_lo;
     FloatType m_hi;
 
 public:
+    static void setImaginaryValueHandling(bool truncate) {
+        s_truncateImaginaryValue = truncate;
+    }
+    static bool truncateImaginaryValue() {
+        return s_truncateImaginaryValue;
+    }
+
     Interval(FloatType x = 0) : m_lo(x), m_hi(x) {}
     Interval(FloatType lo, FloatType hi) : m_lo(lo), m_hi(hi) {}
 
@@ -121,9 +130,9 @@ public:
     }
     Interval &operator-=(const Interval &r) {
         std::fesetround(FE_DOWNWARD);
-        m_lo -= r.m_lo;
+        m_lo -= r.m_hi;
         std::fesetround(FE_UPWARD);
-        m_hi -= r.m_hi;
+        m_hi -= r.m_lo;
         std::fesetround(FE_TONEAREST);
 
         return *this;
@@ -288,21 +297,42 @@ public:
         return *this;
     }
 
-    template <std::floating_point FloatType>
-    friend inline Interval<FloatType> sqrt(const Interval<FloatType> &v) {
-        Interval<FloatType> ret;
-        if (v.m_lo < 0.0f)
-            throw std::domain_error("Interval: sqrt of a negative value.");
+    friend inline Interval pow2(const Interval &v) {
+        Interval ret;
+        FloatType absLo = std::fabs(v.m_lo);
+        FloatType absHi = std::fabs(v.m_hi);
+        if (absLo > absHi)
+            std::swap(absLo, absHi);
+        std::fesetround(FE_DOWNWARD);
+        ret.m_lo = absLo * absLo;
+        std::fesetround(FE_UPWARD);
+        ret.m_hi = absHi * absHi;
+        std::fesetround(FE_TONEAREST);
+
+        return ret;
+    }
+    friend inline Interval sqrt(const Interval &v) {
+        Interval ret;
+        Interval mv = v;
+        if (mv.m_lo < 0.0f) {
+            if (Interval::truncateImaginaryValue())
+                mv.m_lo = 0.0f;
+            else
+                throw std::domain_error("Interval: sqrt of a negative value.");
+        }
 
         std::fesetround(FE_DOWNWARD);
-        ret.m_lo = std::sqrt(v.m_lo);
+        ret.m_lo = std::sqrt(mv.m_lo);
         std::fesetround(FE_UPWARD);
-        ret.m_hi = std::sqrt(v.m_hi);
+        ret.m_hi = std::sqrt(mv.m_hi);
         std::fesetround(FE_TONEAREST);
 
         return ret;
     }
 };
+
+template <std::floating_point FloatType>
+bool Interval<FloatType>::s_truncateImaginaryValue = false;
 
 
 
@@ -320,7 +350,7 @@ inline Interval<FloatType> operator+(const Interval<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Interval<FloatType> operator+(N a, const Interval<FloatType> &b) {
     Interval<FloatType> ret = b;
     ret += static_cast<FloatType>(a);
@@ -341,7 +371,7 @@ inline Interval<FloatType> operator-(const Interval<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Interval<FloatType> operator-(N a, const Interval<FloatType> &b) {
     Interval<FloatType> ret = -b;
     ret += static_cast<FloatType>(a);
@@ -362,7 +392,7 @@ inline Interval<FloatType> operator*(const Interval<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Interval<FloatType> operator*(N a, const Interval<FloatType> &b) {
     Interval<FloatType> ret = b;
     ret *= static_cast<FloatType>(a);
@@ -383,7 +413,7 @@ inline Interval<FloatType> operator/(const Interval<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Interval<FloatType> operator/(N a, const Interval<FloatType> &b) {
     Interval<FloatType> ret(static_cast<FloatType>(a));
     ret /= b;
@@ -427,14 +457,17 @@ public:
     }
 
     operator Interval<FloatType>() const {
-        FloatType c = m_coeffs.at(0);
-        FloatType d = 0;
+        IntervalF ret(m_coeffs.at(0));
         for (auto it : m_coeffs) {
             if (it.first == 0)
                 continue;
-            d += std::fabs(it.second);
+            FloatType d = std::fabs(it.second);
+            ret += IntervalF(-d, d);
         }
-        return Interval<FloatType>(c - d, c + d);
+        {
+            ret += IntervalF(-m_roundOffCoeff, m_roundOffCoeff);
+        }
+        return ret;
     }
 
     Affine operator+() const {
@@ -462,9 +495,11 @@ public:
                 continue;
             m_coeffs[it.first] = it.second;
         }
-        accRoundOff += m_roundOffCoeff;
-        accRoundOff += r.m_roundOffCoeff;
-        m_roundOffCoeff = accRoundOff.hi();
+        {
+            accRoundOff += m_roundOffCoeff;
+            accRoundOff += r.m_roundOffCoeff;
+            m_roundOffCoeff = accRoundOff.hi();
+        }
 
         cleanUp();
 
@@ -472,13 +507,17 @@ public:
     }
     Affine &operator+=(FloatType r) {
         IntervalF accRoundOff;
-        FloatType &c0 = m_coeffs.at(0);
-        IntervalF ic(c0);
-        ic += r;
-        c0 = ic.center();
-        accRoundOff += ic.radius();
-        accRoundOff += m_roundOffCoeff;
-        m_roundOffCoeff = accRoundOff.hi();
+        {
+            FloatType &c0 = m_coeffs.at(0);
+            IntervalF ic(c0);
+            ic += r;
+            c0 = ic.center();
+            accRoundOff += ic.radius();
+        }
+        {
+            accRoundOff += m_roundOffCoeff;
+            m_roundOffCoeff = accRoundOff.hi();
+        }
         return *this;
     }
     Affine &operator-=(const Affine &r) {
@@ -494,11 +533,13 @@ public:
         for (auto &it : r.m_coeffs) {
             if (m_coeffs.contains(it.first))
                 continue;
-            m_coeffs[it.first] = it.second;
+            m_coeffs[it.first] = -it.second;
         }
-        accRoundOff += m_roundOffCoeff;
-        accRoundOff += r.m_roundOffCoeff;
-        m_roundOffCoeff = accRoundOff.hi();
+        {
+            accRoundOff += m_roundOffCoeff;
+            accRoundOff += r.m_roundOffCoeff;
+            m_roundOffCoeff = accRoundOff.hi();
+        }
 
         cleanUp();
 
@@ -506,13 +547,17 @@ public:
     }
     Affine &operator-=(FloatType r) {
         IntervalF accRoundOff;
-        FloatType &c0 = m_coeffs.at(0);
-        IntervalF ic(c0);
-        ic -= r;
-        c0 = ic.center();
-        accRoundOff += ic.radius();
-        accRoundOff += m_roundOffCoeff;
-        m_roundOffCoeff = accRoundOff.hi();
+        {
+            FloatType &c0 = m_coeffs.at(0);
+            IntervalF ic(c0);
+            ic -= r;
+            c0 = ic.center();
+            accRoundOff += ic.radius();
+        }
+        {
+            accRoundOff += m_roundOffCoeff;
+            m_roundOffCoeff = accRoundOff.hi();
+        }
         return *this;
     }
     Affine &operator*=(const Affine &r) {
@@ -566,11 +611,11 @@ public:
         {
             // Quick conservative estimate
             accRoundOff += u * v;
+            //m_roundOffCoeff = accRoundOff.hi();
             // New noise symbol for the non-affine term handles round-off errors also.
             m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+            m_roundOffCoeff = 0;
         }
-
-        m_roundOffCoeff = 0;
 
         cleanUp();
 
@@ -590,10 +635,113 @@ public:
                 it.second = ic.center();
                 accRoundOff += ic.radius();
             }
-            accRoundOff += IntervalF(m_roundOffCoeff) * std::fabs(r);
-            m_roundOffCoeff = accRoundOff.hi();
+            {
+                IntervalF ic(m_roundOffCoeff);
+                ic *= std::fabs(r);
+                accRoundOff += ic.radius();
+                m_roundOffCoeff = accRoundOff.hi();
+            }
         }
         return *this;
+    }
+    friend inline Affine reciprocal(const Affine &v) {
+        IntervalF interval = static_cast<IntervalF>(v);
+        if (interval.lo() <= 0.0f && interval.hi() >= 0.0f)
+            throw std::domain_error("Affine: division by 0.");
+
+        IntervalF ia(interval.lo());
+        IntervalF ib(interval.hi());
+        IntervalF iab = ia * ib;
+        IntervalF ialpha = -1 / iab;
+        IntervalF isqrtab = (interval.lo() > 0.0f ? 1 : -1) * sqrt(iab);
+
+        IntervalF ibeta = (ia + 2 * isqrtab + ib) / (2 * iab);
+        IntervalF idelta = (ia - 2 * isqrtab + ib) / (2 * iab);
+
+        IntervalF accRoundOff;
+
+        IntervalF ic0(ialpha * v.m_coeffs.at(0) + ibeta);
+        Affine ret(ic0.center());
+        accRoundOff += ic0.radius();
+
+        for (auto it : v.m_coeffs) {
+            if (it.first == 0)
+                continue;
+            IntervalF ic(ialpha * it.second);
+            ret.m_coeffs[it.first] = ic.center();
+            accRoundOff += ic.radius();
+        }
+        {
+            IntervalF ic(ialpha * v.m_roundOffCoeff);
+            accRoundOff += ic.radius();
+        }
+
+        accRoundOff += idelta;
+        //ret.m_roundOffCoeff = accRoundOff.hi();
+        // New noise symbol for the non-affine term handles round-off errors also.
+        ret.m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        ret.m_roundOffCoeff = 0;
+
+        return ret;
+    }
+    Affine &operator/=(const Affine &r) {
+        return *this *= reciprocal(r);
+    }
+    Affine &operator/=(FloatType r) {
+        if (std::isinf(r)) {
+            m_coeffs.clear();
+            m_coeffs[0] = 0;
+            m_roundOffCoeff = 0;
+        }
+        else {
+            IntervalF ir(r);
+            IntervalF irecr = 1.0f / ir;
+            Affine aarecr(irecr.lo(), irecr.hi());
+            *this *= aarecr;
+        }
+        return *this;
+    }
+
+    friend inline Affine pow2(const Affine &v) {
+        return v * v;
+    }
+    friend inline Affine sqrt(const Affine &v) {
+        IntervalF interval = static_cast<IntervalF>(v);
+        if (interval.lo() < 0.0f)
+            throw std::domain_error("Interval: sqrt of a negative value.");
+
+        IntervalF isqrt = sqrt(interval);
+        IntervalF isqrt_a(isqrt.lo());
+        IntervalF isqrt_b(isqrt.hi());
+        IntervalF ialpha = 1 / (isqrt_a + isqrt_b);
+        IntervalF ibeta = (isqrt_a + isqrt_b) / 8 + (isqrt_a * isqrt_b) / (isqrt_a + isqrt_b) / 2;
+        IntervalF idelta = pow2(isqrt_b - isqrt_a) / (8 * (isqrt_a + isqrt_b));
+
+        IntervalF accRoundOff;
+
+        IntervalF ic0(ialpha * v.m_coeffs.at(0) + ibeta);
+        Affine ret(ic0.center());
+        accRoundOff += ic0.radius();
+
+        for (auto it : v.m_coeffs) {
+            if (it.first == 0)
+                continue;
+            IntervalF ic(ialpha * it.second);
+            ret.m_coeffs[it.first] = ic.center();
+            accRoundOff += ic.radius();
+        }
+        {
+            IntervalF ic(ialpha * v.m_roundOffCoeff);
+            accRoundOff += ic.radius();
+        }
+
+        accRoundOff += idelta;
+        //ret.m_roundOffCoeff = accRoundOff.hi();
+        // New noise symbol for the non-affine term handles round-off errors also.
+        ret.m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        ret.m_roundOffCoeff = 0;
+
+        return ret;
     }
 };
 
@@ -615,7 +763,7 @@ inline Affine<FloatType> operator+(const Affine<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Affine<FloatType> operator+(N a, const Affine<FloatType> &b) {
     Affine<FloatType> ret = b;
     ret += static_cast<FloatType>(a);
@@ -636,7 +784,7 @@ inline Affine<FloatType> operator-(const Affine<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Affine<FloatType> operator-(N a, const Affine<FloatType> &b) {
     Affine<FloatType> ret = -b;
     ret += static_cast<FloatType>(a);
@@ -657,10 +805,31 @@ inline Affine<FloatType> operator*(const Affine<FloatType> &a, N b) {
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
+template <Number N, std::floating_point FloatType>
 inline Affine<FloatType> operator*(N a, const Affine<FloatType> &b) {
     Affine<FloatType> ret = b;
     ret *= static_cast<FloatType>(a);
+    return ret;
+}
+
+template <std::floating_point FloatType>
+inline Affine<FloatType> operator/(const Affine<FloatType> &a, const Affine<FloatType> &b) {
+    Affine<FloatType> ret = a;
+    ret /= b;
+    return ret;
+}
+
+template <std::floating_point FloatType, Number N>
+inline Affine<FloatType> operator/(const Affine<FloatType> &a, N b) {
+    Affine<FloatType> ret = a;
+    ret /= static_cast<FloatType>(b);
+    return ret;
+}
+
+template <Number N, std::floating_point FloatType>
+inline Affine<FloatType> operator/(N a, const Affine<FloatType> &b) {
+    Affine<FloatType> ret(a);
+    ret /= b;
     return ret;
 }
 
@@ -669,21 +838,54 @@ inline Affine<FloatType> operator*(N a, const Affine<FloatType> &b) {
 using FP32Interval = Interval<float>;
 using FP32Affine = Affine<float>;
 
+
+
+template <typename ValueType>
+inline ValueType g(const ValueType &x) {
+    ValueType a = pow2(x);
+    return sqrt(a - x + 0.5f) / sqrt(a + 0.5f);
+}
+
 int32_t main(int32_t argc, const char* argv[]) {
+    //{
+    //    FP32Interval x(-2.0f, 2.0f);
+    //    FP32Interval r(-1.0f, 1.0f);
+    //    FP32Interval s(-1.0f, 1.0f);
+    //    FP32Interval z = (10 + x + r) * (10 - x + s);
+    //    //auto sqx = sqrt(x);
+    //    printf("");
+    //}
+    //{
+    //    FP32Affine x(-2.0f, 2.0f);
+    //    FP32Affine r(-1.0f, 1.0f);
+    //    FP32Affine s(-1.0f, 1.0f);
+    //    FP32Affine z = (10 + x + r) * (10 - x + s);
+    //    auto iz = static_cast<FP32Interval>(z);
+    //    auto sqz = sqrt(z);
+    //    printf("");
+    //}
+
     {
-        FP32Interval x(-2.0f, 2.0f);
-        FP32Interval r(-1.0f, 1.0f);
-        FP32Interval s(-1.0f, 1.0f);
-        FP32Interval z = (10 + x + r) * (10 - x + s);
-        printf("");
-    }
-    {
-        FP32Affine x(-2.0f, 2.0f);
-        FP32Affine r(-1.0f, 1.0f);
-        FP32Affine s(-1.0f, 1.0f);
-        FP32Affine z = (10 + x + r) * (10 - x + s);
-        auto iz = static_cast<FP32Interval>(z);
-        printf("");
+        FP32Interval::setImaginaryValueHandling(true);
+
+        constexpr uint32_t N = 16;
+        for (int i = 0; i < N; ++i) {
+            //FP32Interval iintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+            //FP32Interval iv1 = g(iintv);
+            //FP32Interval iv2 = g(iv1);
+            //devPrintf(
+            //    "%g, %g, %g, %g\n",
+            //    iv1.lo(), iv1.hi(), iv2.lo(), iv2.hi());
+
+            FP32Affine aaintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+            FP32Affine aav1 = g(aaintv);
+            FP32Affine aav2 = g(aav1);
+            auto iaav1 = static_cast<FP32Interval>(aav1);
+            auto iaav2 = static_cast<FP32Interval>(aav2);
+            devPrintf(
+                "%g, %g, %g, %g\n",
+                iaav1.lo(), iaav1.hi(), iaav2.lo(), iaav2.hi());
+        }
     }
 
     return 0;
