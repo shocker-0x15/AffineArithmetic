@@ -3,6 +3,8 @@
 References:
 - Affine Arithmetic and its Applications to Computer Graphics
 - Affine Arithmeticについて
+- Fast reliable interrogation of procedurally defined implicit surfaces
+  using extended revised affine arithmetic
 
 */
 
@@ -297,6 +299,17 @@ public:
         return *this;
     }
 
+    friend inline Interval abs(const Interval &v) {
+        Interval ret;
+        FloatType absLo = std::fabs(v.m_lo);
+        FloatType absHi = std::fabs(v.m_hi);
+        if (absLo > absHi)
+            std::swap(absLo, absHi);
+        ret.m_lo = absLo;
+        ret.m_hi = absHi;
+
+        return ret;
+    }
     friend inline Interval pow2(const Interval &v) {
         Interval ret;
         FloatType absLo = std::fabs(v.m_lo);
@@ -449,12 +462,12 @@ public:
         m_coeffs[0] = x;
         m_roundOffCoeff = 0;
     }
-    Affine(FloatType lo, FloatType hi) {
-        IntervalF i(lo, hi);
-        m_coeffs[0] = i.center();
-        m_coeffs[getNewNoiseSymbol()] = i.radius();
+    Affine(const IntervalF &x) {
+        m_coeffs[0] = x.center();
+        m_coeffs[getNewNoiseSymbol()] = x.radius();
         m_roundOffCoeff = 0;
     }
+    Affine(FloatType lo, FloatType hi) : Affine(IntervalF(lo, hi)) {}
 
     operator Interval<FloatType>() const {
         IntervalF ret(m_coeffs.at(0));
@@ -536,6 +549,7 @@ public:
             m_coeffs[it.first] = -it.second;
         }
         {
+            // The round-off coefficients don't cancel each other.
             accRoundOff += m_roundOffCoeff;
             accRoundOff += r.m_roundOffCoeff;
             m_roundOffCoeff = accRoundOff.hi();
@@ -588,7 +602,8 @@ public:
         }
         {
             u += m_roundOffCoeff;
-            accRoundOff += r_c0 * m_roundOffCoeff;
+            IntervalF ic = abs(r_c0) * m_roundOffCoeff;
+            accRoundOff += ic;
         }
         for (auto &it : r.m_coeffs) {
             if (it.first == 0)
@@ -604,17 +619,25 @@ public:
         }
         {
             v += r.m_roundOffCoeff;
-            accRoundOff += c0 * r.m_roundOffCoeff;
+            IntervalF ic = abs(c0) * r.m_roundOffCoeff;
+            accRoundOff += ic;
         }
 
         // Non-Affine term
         {
             // Quick conservative estimate
-            accRoundOff += u * v;
-            //m_roundOffCoeff = accRoundOff.hi();
-            // New noise symbol for the non-affine term handles round-off errors also.
-            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
-            m_roundOffCoeff = 0;
+            IntervalF ic = u * v;
+            if constexpr (false) {
+                m_coeffs[getNewNoiseSymbol()] = ic.center();
+                accRoundOff += ic.radius();
+                m_roundOffCoeff = accRoundOff.hi();
+            }
+            else {
+                ic += accRoundOff;
+                // New noise symbol for the non-affine term handles round-off errors also.
+                m_coeffs[getNewNoiseSymbol()] = ic.hi();
+                m_roundOffCoeff = 0;
+            }
         }
 
         cleanUp();
@@ -622,26 +645,22 @@ public:
         return *this;
     }
     Affine &operator*=(FloatType r) {
-        if (r == 0) {
-            m_coeffs.clear();
-            m_coeffs[0] = 0;
-            m_roundOffCoeff = 0;
+        IntervalF accRoundOff;
+        for (auto &it : m_coeffs) {
+            IntervalF ic(it.second);
+            ic *= r;
+            it.second = ic.center();
+            accRoundOff += ic.radius();
         }
-        else {
-            IntervalF accRoundOff;
-            for (auto &it : m_coeffs) {
-                IntervalF ic(it.second);
-                ic *= r;
-                it.second = ic.center();
-                accRoundOff += ic.radius();
-            }
-            {
-                IntervalF ic(m_roundOffCoeff);
-                ic *= std::fabs(r);
-                accRoundOff += ic.radius();
-                m_roundOffCoeff = accRoundOff.hi();
-            }
+        {
+            IntervalF ic(m_roundOffCoeff);
+            ic *= std::fabs(r);
+            accRoundOff += ic;
+            m_roundOffCoeff = accRoundOff.hi();
         }
+
+        cleanUp();
+
         return *this;
     }
     friend inline Affine reciprocal(const Affine &v) {
@@ -671,13 +690,9 @@ public:
             ret.m_coeffs[it.first] = ic.center();
             accRoundOff += ic.radius();
         }
-        {
-            IntervalF ic(ialpha * v.m_roundOffCoeff);
-            accRoundOff += ic.radius();
-        }
-
+        accRoundOff += IntervalF(abs(ialpha) * v.m_roundOffCoeff);
         accRoundOff += idelta;
-        //ret.m_roundOffCoeff = accRoundOff.hi();
+
         // New noise symbol for the non-affine term handles round-off errors also.
         ret.m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
         ret.m_roundOffCoeff = 0;
@@ -694,10 +709,7 @@ public:
             m_roundOffCoeff = 0;
         }
         else {
-            IntervalF ir(r);
-            IntervalF irecr = 1.0f / ir;
-            Affine aarecr(irecr.lo(), irecr.hi());
-            *this *= aarecr;
+            *this *= Affine(1.0f / IntervalF(r));
         }
         return *this;
     }
