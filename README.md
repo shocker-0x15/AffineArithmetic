@@ -1,4 +1,4 @@
-# Affine Arithmetic Implementation for Learning
+Ôªø# Affine Arithmetic Implementation for Learning
 
 - Interval Arithmetic
 - Affine Arithmetic
@@ -14,7 +14,7 @@
 
 ## References
 - [Affine Arithmetic and its Applications to Computer Graphics](https://graphics.stanford.edu/~comba/papers/aa-93-09-sibgrapi-paper.pdf)
-- [Affine ArithmeticÇ…Ç¬Ç¢Çƒ](http://verifiedby.me/kv/nv-boost/affine/affine.pdf)
+- [Affine Arithmetic„Å´„Å§„ÅÑ„Å¶](http://verifiedby.me/kv/nv-boost/affine/affine.pdf)
 - [Fast reliable interrogation of procedurally defined implicit surfaces using extended revised affine arithmetic](https://www.researchgate.net/publication/220251211_Fast_reliable_interrogation_of_procedurally_defined_implicit_surfaces_using_extended_revised_affine_arithmetic)
 
 ----
