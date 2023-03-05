@@ -328,7 +328,7 @@ public:
         IAFloat ret;
         IAFloat mv = v;
         if (mv.m_lo < 0.0f) {
-            if (IAFloat::truncateImaginaryValue())
+            if (truncateImaginaryValue())
                 mv.m_lo = 0.0f;
             else
                 throw std::domain_error("IAFloat: sqrt of a negative value.");
@@ -466,6 +466,40 @@ class AAFloat {
             else
                 ++it;
         }
+    }
+
+    static AAFloat affineApproximation(
+        const AAFloat &v,
+        const ia_fp_t &ialpha, const ia_fp_t &ibeta, ia_fp_t idelta) {
+        ia_fp_t accRoundOff;
+
+        // Affine terms
+        ia_fp_t ic0(ialpha * v.m_coeffs.at(0) + ibeta);
+        AAFloat ret(ic0.center());
+        accRoundOff += ic0.radius();
+        for (auto it : v.m_coeffs) {
+            if (it.first == 0)
+                continue;
+            ia_fp_t ic(ialpha * it.second);
+            ret.m_coeffs[it.first] = ic.center();
+            accRoundOff += ic.radius();
+        }
+        if constexpr (roundOffMode != AARoundOffMode::Everytime)
+            idelta += abs(ialpha) * v.m_roundOffCoeff;
+
+        // Non-affine term
+        {
+            idelta += accRoundOff;
+            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
+                // New noise symbol for the non-affine term handles round-off errors also.
+                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
+            }
+            else {
+                ret.m_roundOffCoeff = idelta.hi();
+            }
+        }
+
+        return ret;
     }
 
 public:
@@ -704,35 +738,7 @@ public:
         ia_fp_t ibeta = (ia + 2 * isqrtab + ib) / (2 * iab);
         ia_fp_t idelta = (ia - 2 * isqrtab + ib) / (2 * iab);
 
-        ia_fp_t accRoundOff;
-
-        // Affine terms
-        ia_fp_t ic0(ialpha * v.m_coeffs.at(0) + ibeta);
-        AAFloat ret(ic0.center());
-        accRoundOff += ic0.radius();
-        for (auto it : v.m_coeffs) {
-            if (it.first == 0)
-                continue;
-            ia_fp_t ic(ialpha * it.second);
-            ret.m_coeffs[it.first] = ic.center();
-            accRoundOff += ic.radius();
-        }
-        if constexpr (roundOffMode != AARoundOffMode::Everytime)
-            idelta += abs(ialpha) * v.m_roundOffCoeff;
-
-        // Non-affine term
-        {
-            idelta += accRoundOff;
-            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
-                // New noise symbol for the non-affine term handles round-off errors also.
-                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
-            }
-            else {
-                ret.m_roundOffCoeff = idelta.hi();
-            }
-        }
-
-        return ret;
+        return affineApproximation(v, ialpha, ibeta, idelta);
     }
     AAFloat &operator/=(const AAFloat &r) {
         return *this *= reciprocal(r);
@@ -765,35 +771,7 @@ public:
         ia_fp_t ibeta = (isqrt_a + isqrt_b) / 8 + (isqrt_a * isqrt_b) / (isqrt_a + isqrt_b) / 2;
         ia_fp_t idelta = pow2(isqrt_b - isqrt_a) / (8 * (isqrt_a + isqrt_b));
 
-        ia_fp_t accRoundOff;
-
-        // Affine terms
-        ia_fp_t ic0(ialpha * v.m_coeffs.at(0) + ibeta);
-        AAFloat ret(ic0.center());
-        accRoundOff += ic0.radius();
-        for (auto it : v.m_coeffs) {
-            if (it.first == 0)
-                continue;
-            ia_fp_t ic(ialpha * it.second);
-            ret.m_coeffs[it.first] = ic.center();
-            accRoundOff += ic.radius();
-        }
-        if constexpr (roundOffMode != AARoundOffMode::Everytime)
-            idelta += abs(ialpha) * v.m_roundOffCoeff;
-
-        // Non-affine term
-        {
-            idelta += accRoundOff;
-            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
-                // New noise symbol for the non-affine term handles round-off errors also.
-                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
-            }
-            else {
-                ret.m_roundOffCoeff = idelta.hi();
-            }
-        }
-
-        return ret;
+        return affineApproximation(v, ialpha, ibeta, idelta);
     }
 };
 
@@ -901,46 +879,47 @@ inline ValueType g(const ValueType &x) {
 }
 
 int32_t main(int32_t argc, const char* argv[]) {
-    //{
-    //    ia_fp32_t x(-2.0f, 2.0f);
-    //    ia_fp32_t r(-1.0f, 1.0f);
-    //    ia_fp32_t s(-1.0f, 1.0f);
-    //    ia_fp32_t z = (10 + x + r) * (10 - x + s);
-    //    //auto sqx = sqrt(x);
-    //    printf("");
-    //}
-    //{
-    //    FP32Affine x(-2.0f, 2.0f);
-    //    FP32Affine r(-1.0f, 1.0f);
-    //    FP32Affine s(-1.0f, 1.0f);
-    //    FP32Affine z = (10 + x + r) * (10 - x + s);
-    //    auto iz = static_cast<ia_fp32_t>(z);
-    //    auto sqz = sqrt(z);
-    //    printf("");
-    //}
+    {
+        ia_fp32_t x(-2.0f, 2.0f);
+        ia_fp32_t r(-1.0f, 1.0f);
+        ia_fp32_t s(-1.0f, 1.0f);
+        ia_fp32_t z = (10 + x + r) * (10 - x + s);
+        //auto sqx = sqrt(x);
+        printf("");
+    }
+    {
+        aa_fp32_t x(-2.0f, 2.0f);
+        aa_fp32_t r(-1.0f, 1.0f);
+        aa_fp32_t s(-1.0f, 1.0f);
+        aa_fp32_t z = (10 + x + r) * (10 - x + s);
+        auto iz = static_cast<ia_fp32_t>(z);
+        auto sqz = sqrt(z);
+        printf("");
+    }
 
-    //{
-    //    ia_fp32_t::setImaginaryValueHandling(true);
+    {
+        ia_fp32_t::setImaginaryValueHandling(true);
 
-    //    constexpr uint32_t N = 16;
-    //    for (int i = 0; i < N; ++i) {
-    //        //ia_fp32_t iintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
-    //        //ia_fp32_t iv1 = g(iintv);
-    //        //ia_fp32_t iv2 = g(iv1);
-    //        //devPrintf(
-    //        //    "%g, %g, %g, %g\n",
-    //        //    iv1.lo(), iv1.hi(), iv2.lo(), iv2.hi());
+        constexpr uint32_t N = 16;
+        for (int i = 0; i < N; ++i) {
+            //ia_fp32_t iintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+            //ia_fp32_t iv1 = g(iintv);
+            //ia_fp32_t iv2 = g(iv1);
+            //devPrintf(
+            //    "%g, %g, %g, %g\n",
+            //    iv1.lo(), iv1.hi(), iv2.lo(), iv2.hi());
 
-    //        aa_fp32_t aaintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
-    //        aa_fp32_t aav1 = g(aaintv);
-    //        aa_fp32_t aav2 = g(aav1);
-    //        auto iaav1 = static_cast<ia_fp32_t>(aav1);
-    //        auto iaav2 = static_cast<ia_fp32_t>(aav2);
-    //        devPrintf(
-    //            "%g, %g, %g, %g\n",
-    //            iaav1.lo(), iaav1.hi(), iaav2.lo(), iaav2.hi());
-    //    }
-    //}
+            aa_fp32_t aaintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+            aa_fp32_t aav1 = g(aaintv);
+            aa_fp32_t aav2 = g(aav1);
+            auto iaav1 = static_cast<ia_fp32_t>(aav1);
+            auto iaav2 = static_cast<ia_fp32_t>(aav2);
+            devPrintf(
+                "%g, %g, %g, %g\n",
+                iaav1.lo(), iaav1.hi(), iaav2.lo(), iaav2.hi());
+        }
+        devPrintf("\n");
+    }
 
     {
         using FloatType = double;
@@ -1018,7 +997,7 @@ int32_t main(int32_t argc, const char* argv[]) {
                 std::max(ia_aa2_x.radius(), ia_aa2_y.radius()),
                 std::max(ia_aa3_x.radius(), ia_aa3_y.radius()));
         }
-        devPrintf("");
+        devPrintf("\n");
     }
 
     return 0;
