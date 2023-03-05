@@ -435,7 +435,13 @@ inline IAFloat<FloatType> operator/(N a, const IAFloat<FloatType> &b) {
 
 
 
-template <std::floating_point FloatType>
+enum class AARoundOffMode {
+    Everytime = 0,
+    Dedicated,
+    IncludesNonAffine
+};
+
+template <std::floating_point FloatType, AARoundOffMode roundOffMode = AARoundOffMode::Dedicated>
 class AAFloat {
     using ia_fp_t = IAFloat<FloatType>;
 
@@ -445,8 +451,13 @@ class AAFloat {
         return s_ID++;
     }
 
+    struct Empty {};
+
     std::unordered_map<uint32_t, FloatType> m_coeffs;
-    FloatType m_roundOffCoeff;
+    [[no_unique_address]] std::conditional_t<
+        roundOffMode != AARoundOffMode::Everytime,
+        FloatType,
+        Empty> m_roundOffCoeff;
 
     void cleanUp() {
         for (auto it = m_coeffs.begin(); it != m_coeffs.end();) {
@@ -460,12 +471,14 @@ class AAFloat {
 public:
     AAFloat(FloatType x = 0) {
         m_coeffs[0] = x;
-        m_roundOffCoeff = 0;
+        if constexpr (roundOffMode != AARoundOffMode::Everytime)
+            m_roundOffCoeff = 0;
     }
     AAFloat(const ia_fp_t &x) {
         m_coeffs[0] = x.center();
         m_coeffs[getNewNoiseSymbol()] = x.radius();
-        m_roundOffCoeff = 0;
+        if constexpr (roundOffMode != AARoundOffMode::Everytime)
+            m_roundOffCoeff = 0;
     }
     AAFloat(FloatType lo, FloatType hi) : AAFloat(ia_fp_t(lo, hi)) {}
 
@@ -477,7 +490,7 @@ public:
             FloatType d = std::fabs(it.second);
             ret += ia_fp_t(-d, d);
         }
-        {
+        if constexpr (roundOffMode != AARoundOffMode::Everytime) {
             ret += ia_fp_t(-m_roundOffCoeff, m_roundOffCoeff);
         }
         return ret;
@@ -508,7 +521,10 @@ public:
                 continue;
             m_coeffs[it.first] = it.second;
         }
-        {
+        if constexpr (roundOffMode == AARoundOffMode::Everytime) {
+            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        }
+        else {
             accRoundOff += m_roundOffCoeff;
             accRoundOff += r.m_roundOffCoeff;
             m_roundOffCoeff = accRoundOff.hi();
@@ -527,7 +543,10 @@ public:
             c0 = ic.center();
             accRoundOff += ic.radius();
         }
-        {
+        if constexpr (roundOffMode == AARoundOffMode::Everytime) {
+            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        }
+        else {
             accRoundOff += m_roundOffCoeff;
             m_roundOffCoeff = accRoundOff.hi();
         }
@@ -548,7 +567,10 @@ public:
                 continue;
             m_coeffs[it.first] = -it.second;
         }
-        {
+        if constexpr (roundOffMode == AARoundOffMode::Everytime) {
+            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        }
+        else {
             // The round-off coefficients don't cancel each other.
             accRoundOff += m_roundOffCoeff;
             accRoundOff += r.m_roundOffCoeff;
@@ -568,7 +590,10 @@ public:
             c0 = ic.center();
             accRoundOff += ic.radius();
         }
-        {
+        if constexpr (roundOffMode == AARoundOffMode::Everytime) {
+            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        }
+        else {
             accRoundOff += m_roundOffCoeff;
             m_roundOffCoeff = accRoundOff.hi();
         }
@@ -600,7 +625,7 @@ public:
             it.second = ic.center();
             accRoundOff += ic.radius();
         }
-        {
+        if constexpr (roundOffMode != AARoundOffMode::Everytime) {
             u += m_roundOffCoeff;
             ia_fp_t ic = abs(r_c0) * m_roundOffCoeff;
             accRoundOff += ic;
@@ -617,26 +642,25 @@ public:
             m_coeffs[it.first] = ic.center();
             accRoundOff += ic.radius();
         }
-        {
+        if constexpr (roundOffMode != AARoundOffMode::Everytime) {
             v += r.m_roundOffCoeff;
             ia_fp_t ic = abs(c0) * r.m_roundOffCoeff;
             accRoundOff += ic;
         }
 
-        // Non-Affine term
+        // Non-affine term
         {
             // Quick conservative estimate
             ia_fp_t ic = u * v;
-            if constexpr (false) {
-                m_coeffs[getNewNoiseSymbol()] = ic.center();
-                accRoundOff += ic.radius();
-                m_roundOffCoeff = accRoundOff.hi();
-            }
-            else {
-                ic += accRoundOff;
+            ic += accRoundOff;
+            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
                 // New noise symbol for the non-affine term handles round-off errors also.
                 m_coeffs[getNewNoiseSymbol()] = ic.hi();
-                m_roundOffCoeff = 0;
+                if constexpr (roundOffMode == AARoundOffMode::Dedicated)
+                    m_roundOffCoeff = 0;
+            }
+            else {
+                m_roundOffCoeff = ic.hi();
             }
         }
 
@@ -652,7 +676,10 @@ public:
             it.second = ic.center();
             accRoundOff += ic.radius();
         }
-        {
+        if constexpr (roundOffMode == AARoundOffMode::Everytime) {
+            m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
+        }
+        else {
             ia_fp_t ic(m_roundOffCoeff);
             ic *= std::fabs(r);
             accRoundOff += ic;
@@ -679,10 +706,10 @@ public:
 
         ia_fp_t accRoundOff;
 
+        // Affine terms
         ia_fp_t ic0(ialpha * v.m_coeffs.at(0) + ibeta);
         AAFloat ret(ic0.center());
         accRoundOff += ic0.radius();
-
         for (auto it : v.m_coeffs) {
             if (it.first == 0)
                 continue;
@@ -690,12 +717,20 @@ public:
             ret.m_coeffs[it.first] = ic.center();
             accRoundOff += ic.radius();
         }
-        accRoundOff += ia_fp_t(abs(ialpha) * v.m_roundOffCoeff);
-        accRoundOff += idelta;
+        if constexpr (roundOffMode != AARoundOffMode::Everytime)
+            idelta += abs(ialpha) * v.m_roundOffCoeff;
 
-        // New noise symbol for the non-affine term handles round-off errors also.
-        ret.m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
-        ret.m_roundOffCoeff = 0;
+        // Non-affine term
+        {
+            idelta += accRoundOff;
+            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
+                // New noise symbol for the non-affine term handles round-off errors also.
+                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
+            }
+            else {
+                ret.m_roundOffCoeff = idelta.hi();
+            }
+        }
 
         return ret;
     }
@@ -706,7 +741,8 @@ public:
         if (std::isinf(r)) {
             m_coeffs.clear();
             m_coeffs[0] = 0;
-            m_roundOffCoeff = 0;
+            if constexpr (roundOffMode != AARoundOffMode::Everytime)
+                m_roundOffCoeff = 0;
         }
         else {
             *this *= AAFloat(1.0f / ia_fp_t(r));
@@ -731,10 +767,10 @@ public:
 
         ia_fp_t accRoundOff;
 
+        // Affine terms
         ia_fp_t ic0(ialpha * v.m_coeffs.at(0) + ibeta);
         AAFloat ret(ic0.center());
         accRoundOff += ic0.radius();
-
         for (auto it : v.m_coeffs) {
             if (it.first == 0)
                 continue;
@@ -742,105 +778,109 @@ public:
             ret.m_coeffs[it.first] = ic.center();
             accRoundOff += ic.radius();
         }
-        {
-            ia_fp_t ic(ialpha * v.m_roundOffCoeff);
-            accRoundOff += ic.radius();
-        }
+        if constexpr (roundOffMode != AARoundOffMode::Everytime)
+            idelta += abs(ialpha) * v.m_roundOffCoeff;
 
-        accRoundOff += idelta;
-        //ret.m_roundOffCoeff = accRoundOff.hi();
-        // New noise symbol for the non-affine term handles round-off errors also.
-        ret.m_coeffs[getNewNoiseSymbol()] = accRoundOff.hi();
-        ret.m_roundOffCoeff = 0;
+        // Non-affine term
+        {
+            idelta += accRoundOff;
+            if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
+                // New noise symbol for the non-affine term handles round-off errors also.
+                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
+            }
+            else {
+                ret.m_roundOffCoeff = idelta.hi();
+            }
+        }
 
         return ret;
     }
 };
 
-template <std::floating_point FloatType> uint32_t AAFloat<FloatType>::s_ID = 1;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode> uint32_t AAFloat<FloatType, roundOffMode>::s_ID = 1;
 
 
 
-template <std::floating_point FloatType>
-inline AAFloat<FloatType> operator+(const AAFloat<FloatType> &a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator+(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret += b;
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
-inline AAFloat<FloatType> operator+(const AAFloat<FloatType> &a, N b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
+inline AAFloat<FloatType, roundOffMode> operator+(const AAFloat<FloatType, roundOffMode> &a, N b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret += static_cast<FloatType>(b);
     return ret;
 }
 
-template <Number N, std::floating_point FloatType>
-inline AAFloat<FloatType> operator+(N a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = b;
+template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator+(N a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = b;
     ret += static_cast<FloatType>(a);
     return ret;
 }
 
-template <std::floating_point FloatType>
-inline AAFloat<FloatType> operator-(const AAFloat<FloatType> &a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator-(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret -= b;
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
-inline AAFloat<FloatType> operator-(const AAFloat<FloatType> &a, N b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
+inline AAFloat<FloatType, roundOffMode> operator-(const AAFloat<FloatType, roundOffMode> &a, N b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret -= static_cast<FloatType>(b);
     return ret;
 }
 
-template <Number N, std::floating_point FloatType>
-inline AAFloat<FloatType> operator-(N a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = -b;
+template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator-(N a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = -b;
     ret += static_cast<FloatType>(a);
     return ret;
 }
 
-template <std::floating_point FloatType>
-inline AAFloat<FloatType> operator*(const AAFloat<FloatType> &a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator*(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret *= b;
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
-inline AAFloat<FloatType> operator*(const AAFloat<FloatType> &a, N b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
+inline AAFloat<FloatType, roundOffMode> operator*(const AAFloat<FloatType, roundOffMode> &a, N b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret *= static_cast<FloatType>(b);
     return ret;
 }
 
-template <Number N, std::floating_point FloatType>
-inline AAFloat<FloatType> operator*(N a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = b;
+template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator*(N a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = b;
     ret *= static_cast<FloatType>(a);
     return ret;
 }
 
-template <std::floating_point FloatType>
-inline AAFloat<FloatType> operator/(const AAFloat<FloatType> &a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator/(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret /= b;
     return ret;
 }
 
-template <std::floating_point FloatType, Number N>
-inline AAFloat<FloatType> operator/(const AAFloat<FloatType> &a, N b) {
-    AAFloat<FloatType> ret = a;
+template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
+inline AAFloat<FloatType, roundOffMode> operator/(const AAFloat<FloatType, roundOffMode> &a, N b) {
+    AAFloat<FloatType, roundOffMode> ret = a;
     ret /= static_cast<FloatType>(b);
     return ret;
 }
 
-template <Number N, std::floating_point FloatType>
-inline AAFloat<FloatType> operator/(N a, const AAFloat<FloatType> &b) {
-    AAFloat<FloatType> ret(a);
+template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
+inline AAFloat<FloatType, roundOffMode> operator/(N a, const AAFloat<FloatType, roundOffMode> &b) {
+    AAFloat<FloatType, roundOffMode> ret(a);
     ret /= b;
     return ret;
 }
@@ -848,7 +888,9 @@ inline AAFloat<FloatType> operator/(N a, const AAFloat<FloatType> &b) {
 
 
 using ia_fp32_t = IAFloat<float>;
-using aa_fp32_t = AAFloat<float>;
+using aa_fp32_t = AAFloat<float, AARoundOffMode::Dedicated>;
+using ia_fp64_t = IAFloat<double>;
+using aa_fp64_t = AAFloat<double, AARoundOffMode::Dedicated>;
 
 
 
@@ -877,27 +919,106 @@ int32_t main(int32_t argc, const char* argv[]) {
     //    printf("");
     //}
 
+    //{
+    //    ia_fp32_t::setImaginaryValueHandling(true);
+
+    //    constexpr uint32_t N = 16;
+    //    for (int i = 0; i < N; ++i) {
+    //        //ia_fp32_t iintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+    //        //ia_fp32_t iv1 = g(iintv);
+    //        //ia_fp32_t iv2 = g(iv1);
+    //        //devPrintf(
+    //        //    "%g, %g, %g, %g\n",
+    //        //    iv1.lo(), iv1.hi(), iv2.lo(), iv2.hi());
+
+    //        aa_fp32_t aaintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
+    //        aa_fp32_t aav1 = g(aaintv);
+    //        aa_fp32_t aav2 = g(aav1);
+    //        auto iaav1 = static_cast<ia_fp32_t>(aav1);
+    //        auto iaav2 = static_cast<ia_fp32_t>(aav2);
+    //        devPrintf(
+    //            "%g, %g, %g, %g\n",
+    //            iaav1.lo(), iaav1.hi(), iaav2.lo(), iaav2.hi());
+    //    }
+    //}
+
     {
-        ia_fp32_t::setImaginaryValueHandling(true);
+        using FloatType = double;
+        using ia_fp_t = IAFloat<FloatType>;
+        using aa1_fp_t = AAFloat<FloatType, AARoundOffMode::Everytime>;
+        using aa2_fp_t = AAFloat<FloatType, AARoundOffMode::Dedicated>;
+        using aa3_fp_t = AAFloat<FloatType, AARoundOffMode::IncludesNonAffine>;
+        constexpr size_t s1 = sizeof(aa1_fp_t);
+        constexpr size_t s2 = sizeof(aa2_fp_t);
+        constexpr size_t s3 = sizeof(aa3_fp_t);
 
-        constexpr uint32_t N = 16;
-        for (int i = 0; i < N; ++i) {
-            //ia_fp32_t iintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
-            //ia_fp32_t iv1 = g(iintv);
-            //ia_fp32_t iv2 = g(iv1);
-            //devPrintf(
-            //    "%g, %g, %g, %g\n",
-            //    iv1.lo(), iv1.hi(), iv2.lo(), iv2.hi());
-
-            aa_fp32_t aaintv(-2 + 4.0f * i / N, -2 + 4.0f * (i + 1) / N);
-            aa_fp32_t aav1 = g(aaintv);
-            aa_fp32_t aav2 = g(aav1);
-            auto iaav1 = static_cast<ia_fp32_t>(aav1);
-            auto iaav2 = static_cast<ia_fp32_t>(aav2);
+        ia_fp_t ia_x(-1e-5, 1e-5);
+        ia_fp_t ia_y(-1e-5, 1e-5);
+        aa1_fp_t aa1_x(ia_x);
+        aa1_fp_t aa1_y(ia_y);
+        aa2_fp_t aa2_x(ia_x);
+        aa2_fp_t aa2_y(ia_y);
+        aa3_fp_t aa3_x(ia_x);
+        aa3_fp_t aa3_y(ia_y);
+        {
+            auto ia_aa1_x = static_cast<ia_fp_t>(aa1_x);
+            auto ia_aa1_y = static_cast<ia_fp_t>(aa1_y);
+            auto ia_aa2_x = static_cast<ia_fp_t>(aa2_x);
+            auto ia_aa2_y = static_cast<ia_fp_t>(aa2_y);
+            auto ia_aa3_x = static_cast<ia_fp_t>(aa3_x);
+            auto ia_aa3_y = static_cast<ia_fp_t>(aa3_y);
             devPrintf(
                 "%g, %g, %g, %g\n",
-                iaav1.lo(), iaav1.hi(), iaav2.lo(), iaav2.hi());
+                std::max(ia_x.radius(), ia_y.radius()),
+                std::max(ia_aa1_x.radius(), ia_aa1_y.radius()),
+                std::max(ia_aa2_x.radius(), ia_aa2_y.radius()),
+                std::max(ia_aa3_x.radius(), ia_aa3_y.radius()));
         }
+        constexpr FloatType a = 1.05;
+        constexpr FloatType b = 0.3;
+        for (int i = 0; i < 200; ++i) {
+            ia_fp_t temp_ia_x = ia_x;
+            ia_x = 1 - a * (temp_ia_x * temp_ia_x) + ia_y;
+            ia_y = b * temp_ia_x;
+
+            ia_fp_t ia_aa1_x;
+            ia_fp_t ia_aa1_y;
+            {
+                aa1_fp_t temp_aa1_x = aa1_x;
+                aa1_x = 1 - a * temp_aa1_x * temp_aa1_x + aa1_y;
+                aa1_y = b * temp_aa1_x;
+                ia_aa1_x = static_cast<ia_fp_t>(aa1_x);
+                ia_aa1_y = static_cast<ia_fp_t>(aa1_y);
+            }
+
+            ia_fp_t ia_aa2_x;
+            ia_fp_t ia_aa2_y;
+            {
+                aa2_fp_t temp_aa2_x = aa2_x;
+                aa2_x = 1 - a * temp_aa2_x * temp_aa2_x + aa2_y;
+                aa2_y = b * temp_aa2_x;
+                ia_aa2_x = static_cast<ia_fp_t>(aa2_x);
+                ia_aa2_y = static_cast<ia_fp_t>(aa2_y);
+            }
+
+            ia_fp_t ia_aa3_x;
+            ia_fp_t ia_aa3_y;
+            {
+                aa3_fp_t temp_aa3_x = aa3_x;
+                aa3_x = 1 - a * temp_aa3_x * temp_aa3_x + aa3_y;
+                aa3_y = b * temp_aa3_x;
+                ia_aa3_x = static_cast<ia_fp_t>(aa3_x);
+                ia_aa3_y = static_cast<ia_fp_t>(aa3_y);
+            }
+
+            devPrintf(
+                "%g, %g, %g, %g\n",
+                std::max(ia_x.radius(), ia_y.radius()),
+                std::max(ia_aa1_x.radius(), ia_aa1_y.radius()),
+                std::max(ia_aa2_x.radius(), ia_aa2_y.radius()),
+                std::max(ia_aa3_x.radius(), ia_aa3_y.radius()));
+        }
+        devPrintf("");
     }
 
     return 0;
