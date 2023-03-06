@@ -351,84 +351,96 @@ uint32_t AAFloat<FloatType, roundOffMode>::s_ID = 1;
 
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator+(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator+(
+    const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret += b;
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
-inline AAFloat<FloatType, roundOffMode> operator+(const AAFloat<FloatType, roundOffMode> &a, N b) {
+inline AAFloat<FloatType, roundOffMode> operator+(
+    const AAFloat<FloatType, roundOffMode> &a, N b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret += static_cast<FloatType>(b);
     return ret;
 }
 
 template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator+(N a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator+(
+    N a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = b;
     ret += static_cast<FloatType>(a);
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator-(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator-(
+    const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret -= b;
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
-inline AAFloat<FloatType, roundOffMode> operator-(const AAFloat<FloatType, roundOffMode> &a, N b) {
+inline AAFloat<FloatType, roundOffMode> operator-(
+    const AAFloat<FloatType, roundOffMode> &a, N b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret -= static_cast<FloatType>(b);
     return ret;
 }
 
 template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator-(N a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator-(
+    N a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = -b;
     ret += static_cast<FloatType>(a);
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator*(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator*(
+    const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret *= b;
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
-inline AAFloat<FloatType, roundOffMode> operator*(const AAFloat<FloatType, roundOffMode> &a, N b) {
+inline AAFloat<FloatType, roundOffMode> operator*(
+    const AAFloat<FloatType, roundOffMode> &a, N b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret *= static_cast<FloatType>(b);
     return ret;
 }
 
 template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator*(N a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator*(
+    N a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = b;
     ret *= static_cast<FloatType>(a);
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator/(const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator/(
+    const AAFloat<FloatType, roundOffMode> &a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret /= b;
     return ret;
 }
 
 template <std::floating_point FloatType, AARoundOffMode roundOffMode, Number N>
-inline AAFloat<FloatType, roundOffMode> operator/(const AAFloat<FloatType, roundOffMode> &a, N b) {
+inline AAFloat<FloatType, roundOffMode> operator/(
+    const AAFloat<FloatType, roundOffMode> &a, N b) {
     AAFloat<FloatType, roundOffMode> ret = a;
     ret /= static_cast<FloatType>(b);
     return ret;
 }
 
 template <Number N, std::floating_point FloatType, AARoundOffMode roundOffMode>
-inline AAFloat<FloatType, roundOffMode> operator/(N a, const AAFloat<FloatType, roundOffMode> &b) {
+inline AAFloat<FloatType, roundOffMode> operator/(
+    N a, const AAFloat<FloatType, roundOffMode> &b) {
     AAFloat<FloatType, roundOffMode> ret(a);
     ret /= b;
     return ret;
