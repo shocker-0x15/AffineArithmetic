@@ -302,9 +302,9 @@ public:
         ia_fp_t ia(interval.lo());
         ia_fp_t ib(interval.hi());
         ia_fp_t iab = ia * ib;
-        ia_fp_t ialpha = -1 / iab;
         ia_fp_t isqrtab = (interval.lo() > 0.0f ? 1 : -1) * sqrt(iab);
 
+        ia_fp_t ialpha = -1 / iab;
         ia_fp_t ibeta = (ia + 2 * isqrtab + ib) / (2 * iab);
         ia_fp_t idelta = (ia - 2 * isqrtab + ib) / (2 * iab);
 
@@ -337,6 +337,7 @@ public:
         ia_fp_t isqrt = sqrt(interval);
         ia_fp_t isqrt_a(isqrt.lo());
         ia_fp_t isqrt_b(isqrt.hi());
+
         ia_fp_t ialpha = 1 / (isqrt_a + isqrt_b);
         ia_fp_t ibeta = (isqrt_a + isqrt_b) / 8 + (isqrt_a * isqrt_b) / (isqrt_a + isqrt_b) / 2;
         ia_fp_t idelta = pow2(isqrt_b - isqrt_a) / (8 * (isqrt_a + isqrt_b));
