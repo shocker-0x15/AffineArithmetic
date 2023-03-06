@@ -3,4 +3,8 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\interval_arithmetic.h" />
+    <ClInclude Include="..\affine_arithmetic.h" />
+  </ItemGroup>
 </Project>
