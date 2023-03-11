@@ -3,6 +3,8 @@
 References:
 - Affine Arithmetic and its Applications to Computer Graphics
 - Affine Arithmeticについて
+- 区間演算の実装について(1)
+  http://verifiedby.me/adiary/070
 - Fast reliable interrogation of procedurally defined implicit surfaces
   using extended revised affine arithmetic
 

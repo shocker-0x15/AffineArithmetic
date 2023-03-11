@@ -62,7 +62,8 @@ class AAFloat {
             idelta += accRoundOff;
             if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
                 // New noise symbol for the non-affine term handles round-off errors also.
-                ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
+                if (idelta.hi() > 0)
+                    ret.m_coeffs[getNewNoiseSymbol()] = idelta.hi();
             }
             else {
                 ret.m_roundOffCoeff = idelta.hi();
@@ -80,7 +81,9 @@ public:
     }
     AAFloat(const ia_fp_t &x) {
         m_coeffs[0] = x.center();
-        m_coeffs[getNewNoiseSymbol()] = x.radius();
+        FloatType r = x.radius();
+        if (r > 0)
+            m_coeffs[getNewNoiseSymbol()] = r;
         if constexpr (roundOffMode != AARoundOffMode::Everytime)
             m_roundOffCoeff = 0;
     }
@@ -98,6 +101,9 @@ public:
             ret += ia_fp_t(-m_roundOffCoeff, m_roundOffCoeff);
         }
         return ret;
+    }
+    IAFloat<FloatType> toIAFloat() const {
+        return static_cast<ia_fp_t>(*this);
     }
 
     AAFloat operator+() const {
@@ -259,7 +265,8 @@ public:
             ic += accRoundOff;
             if constexpr (roundOffMode != AARoundOffMode::IncludesNonAffine) {
                 // New noise symbol for the non-affine term handles round-off errors also.
-                m_coeffs[getNewNoiseSymbol()] = ic.hi();
+                if (ic.hi() > 0)
+                    m_coeffs[getNewNoiseSymbol()] = ic.hi();
                 if constexpr (roundOffMode == AARoundOffMode::Dedicated)
                     m_roundOffCoeff = 0;
             }

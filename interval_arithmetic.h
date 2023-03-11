@@ -34,7 +34,10 @@ public:
     }
 
     IAFloat(FloatType x = 0) : m_lo(x), m_hi(x) {}
-    IAFloat(FloatType lo, FloatType hi) : m_lo(lo), m_hi(hi) {}
+    IAFloat(FloatType lo, FloatType hi) : m_lo(lo), m_hi(hi) {
+        if (m_hi < m_lo)
+            std::swap(m_lo, m_hi);
+    }
 
     FloatType &lo() {
         return m_lo;
